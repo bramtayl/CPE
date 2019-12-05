@@ -9,6 +9,13 @@ library(DBI)
 library(RMariaDB)
 library(readr)
 
+setwd("~/CPE")
+
+# UNSURE: discard purchase information (hasn't been updated for a long time)
+# UNSURE: discard request information (hasn't been updated for a long time)
+# UNSURE: discare report informaation (hasn't been updated for a long time)
+# UNSURE: discard various mailing lists (assuming all can be recalculated if necessary)
+
 # UNSURE: this just splits names at the last space. Good enough?
 name_separator = " (?=[^ ]+$)"
 
@@ -63,7 +70,7 @@ new_participants =
       separate(name, c("first_name", "last_name"), sep = name_separator, fill = "right") %>%
       mutate(
         event_title = "2019 Summer Institute",
-        register_date_2 = mdy_hms(register_date)
+        register_date = mdy_hms(register_date)
       )
   ) %>%
   mutate(
@@ -84,6 +91,7 @@ new_donation_addresses =
   rename(
     campaign_name = `Donation campaign`,
     new_donation = `Database: add this donation`,
+    postal_code = zip,
     receive_date = `Donation Date`,
     source = `Payment method`,
     state_province_abbreviation = state,
@@ -160,8 +168,7 @@ event_address =
     # inexact addresses for events
     street_address = 
       ifelse(is.na(street_address), NA, paste("Near", street_address))
-  ) %>% 
-  select(-location)
+  )
 
 old_financial_type = 
   dbReadTable(database, "civicrm_financial_type") %>%
@@ -204,7 +211,7 @@ committees =
 
 individuals = 
   tables$individuals %>%
-  # UNSURE: are any of these columns meaningful
+  # UNSURE: are any of these columns important?
   # UNSURE: what do the codes in the type column mean?
   select(-brochure, -check_back, -d_100, 
          -d_50, -fall_d_mail, -fall_newsletter, 
@@ -247,13 +254,15 @@ individuals =
     city = my_coalesce(city.y, city.x),
     email = my_coalesce(email.y, email.x),
     partner = my_coalesce(partner.y, partner.x),
+    postal_code = my_coalesce(postal_code.y, postal_code.x),
     phone = my_coalesce(phone.y, phone.x),
     state_province_abbreviation = my_coalesce(state_province_abbreviation.y, state_province_abbreviation.x),
     street_address = my_coalesce(street_address.y, street_address.x),
     supplemental_address_1 = my_coalesce(supplemental_address_1.y, supplemental_address_1.x)
   ) %>%
   select(
-    -city.x, -city.y, -email.x, -email.y, -partner.x, -partner.y, -phone.x, -phone.y,
+    -city.x, -city.y, -email.x, -email.y, -partner.x, -partner.y, 
+    -phone.x, -phone.y, -postal_code.x, -postal_code.y,
     -state_province_abbreviation.x, -state_province_abbreviation.y,
     -street_address.x, -street_address.y, 
     -supplemental_address_1.x, -supplemental_address_1.y
@@ -286,6 +295,7 @@ option_value =
 
 organizations = 
   tables$organizations %>%
+  # UNSURE: what do these codes in these two columns mean?
   select(-code, -group) %>%
   rename(
     created_date = date_enter,
@@ -309,21 +319,8 @@ organizations =
     modified_date = mdy_hms(modified_date)
   )
 
-contact_info =
+contact_info_without_partners =
   bind_rows(
-    # add a new contact for partners
-    # UNSURE: it might be a good idea to create households in civicrm, instead of just linked partners
-    individuals %>%
-      filter(!is.na(partner)) %>%
-      select(partner, last_name, partner_id = id) %>%
-      # split first and last names
-      separate(partner, c("first_name", "other_last_name"), sep = name_separator) %>%
-      mutate(
-        contact_type = "Individual",
-        # use partner's last name if no last name is given
-        last_name = my_coalesce(other_last_name, last_name)
-      ) %>%
-      select(-other_last_name), 
     organizations,
     # add employers of cpe members: cpe members are all already in `individuals``
     cpe_members_employers %>%
@@ -332,17 +329,28 @@ contact_info =
       rename(employee_id = contact_id) %>%
       # remove missing employers
       filter(!is.na(organization_name)) %>%
-      mutate(contact_type = "Organization"),
+      # could be an overlapping organization
+      distinct %>%
+      mutate(contact_type = "Organization") %>%
+      # only if the organization isn't already a contact
+      anti_join(organizations, by = "organization_name"),
     new_participants %>%
+      select(-event_title, -participant_role_name, -register_date) %>%
+      # could be an overlapping particant
+      distinct %>%
       # ignore the contact info if they are already in the individuals table
-      anti_join(individuals, by = c("first_name", "last_name")) %>%
-      select(-event_title, -participant_role_name),
+      anti_join(individuals, by = c("first_name", "last_name")),
     new_participants %>%
-      # none of these organizations are already in the database
       select(organization_name) %>%
       filter(!is.na(organization_name)) %>%
-      distinct,
+      # could be an overlapping organization
+      distinct %>%
+      # only if the organization isn't already a contact
+      anti_join(organizations, by = "organization_name"),
     new_addresses %>%
+      # could be an overlapping donation
+      distinct %>%
+      # only if not already in the table
       anti_join(individuals, by = c("first_name", "last_name")),
     tables$contacts %>%
       select(-contact_id, -entry_id) %>%
@@ -355,7 +363,9 @@ contact_info =
       ) %>%
       mutate(
         contact_type = "Individual"
-      )
+      ) %>%
+      # only if not already in the table
+      anti_join(individuals, by = c("first_name", "last_name"))
   ) %>%
   mutate(
     # create a new id for the new types of contacts
@@ -364,9 +374,37 @@ contact_info =
   ) %>%
   # add to individuals
   bind_rows(
-    individuals %>%
-      select(-partner)
+    individuals
   )
+
+partners = 
+  contact_info_without_partners %>%
+  filter(!is.na(partner)) %>%
+  select(partner, last_name, partner_id = id) %>%
+  # split first and last names
+  separate(partner, c("first_name", "other_last_name"), sep = name_separator, fill = "right") %>%
+  mutate(
+    contact_type = "Individual",
+    # use partner's last name if no last name is given
+    last_name = my_coalesce(other_last_name, last_name)
+  ) %>%
+  select(-other_last_name)
+
+contact_info = 
+  contact_info_without_partners %>%
+  select(-partner) %>%
+  # add partner id for existing contacts
+  left_join(
+    partners %>% select(first_name, last_name, partner_id)
+  ) %>%
+  bind_rows(
+    # new partners
+    partners %>%
+      anti_join(contact_info_without_partners, by = c("first_name", "last_name")) %>%
+      # new partner ids
+      mutate(id = 1:n() + max(contact_info_without_partners$id))
+  ) %>%
+  mutate(is_deleted = my_coalesce(is_deleted, FALSE))
 
 civicrm_contact = 
   contact_info %>%
@@ -418,7 +456,12 @@ civicrm_address =
         city, postal_code, state_province_abbreviation, country_name
       )
   ) %>%
-  mutate(id = coalesce(id, 1:n())) %>%
+  mutate(
+    id = coalesce(id, 1:n()),
+    # truncate long street addresses (there's only one)
+    # UNSURE: lose information
+    street_address = stri_sub(street_address, to = 96)
+  ) %>%
   # remove empty addresses
   filter(!(
     is.na(street_address) & 
@@ -491,7 +534,6 @@ civicrm_membership_type =
     # new membership type ids for non-committees
     id = max(committees$id) + 1:n()
   ) %>%
-  # UNSURE: committee membership is just a kind of membership?
   bind_rows(committees, .) %>%
   # UNSURE: what is a domain?
   mutate(domain_name = "Default Domain Name") %>%
@@ -504,12 +546,11 @@ civicrm_membership_type =
   # the default organization is CPE (and should be renamed as such)
   mutate(organization_name = "Default Organization") %>%
   left_join(
-    contact_info %>%
+    dbReadTable(database, "civicrm_contact") %>%
       select(member_of_contact_id = id, organization_name)
   ) %>%
   select(-organization_name) %>%
-  # UNSURE: don't think this matters because none of the memberships require payment yet
-  # replace financial type name with id
+  # replace financial type name with id. doesn't matter because none of the memberships require payment yet
   mutate(financial_type_name = "Donation") %>%
   left_join(
     civicrm_financial_type %>%
@@ -548,7 +589,7 @@ civicrm_participant =
         participant_role_name = "Speaker"
       ),
     new_participants %>%
-      select(first_name, last_name, participant_role_name, event_title) %>%
+      select(first_name, last_name, participant_role_name, event_title, register_date) %>%
       left_join(
         contact_info %>% 
           select(first_name, last_name, contact_id = id)) %>%
@@ -684,7 +725,7 @@ contact_relationship =
 
 contribution_donors = 
   tables$donations %>%
-  # UNSURE: the columns seem potentially useful
+  # UNSURE: these columns seem potentially useful
   select(-pledge_id, -pledge, -request) %>%
   rename(
     campaign_id = campaign,
@@ -696,28 +737,56 @@ contribution_donors =
   ) %>%
   mutate(
     # use grant and in kind to create financial type
-    # UNSURE: potentially could be in kind grants?
+    # UNSURE: potentially could be in kind and a grant?
     financial_type_name = 
       ifelse(as.logical(grant), "Grant", 
              ifelse(as.logical(inkind), "In Kind", "Donation")
       ),
     receive_date = mdy_hms(receive_date),
-    # UNSURE: just use the thank you date of today
+    # UNSURE: just use a thank you date of today
     thankyou_date = as.POSIXct(ifelse(letter, Sys.time(), NA), origin = "1970-01-01"),
     # fill in 0 if the amount is missing
     total_amount = my_coalesce(total_amount, 0)
   ) %>%
   select(-grant, -inkind, -letter) %>%
   bind_rows(
+    tables$grants %>%
+      # ignoring projects
+      # UNSURE: are these grants already in the donations table?
+      # UNSURE: what units is duration in?
+      select(-grant_id, -project_id, -duration) %>%
+      rename(
+        contact_id_1 = individual_id,
+        total_amount = amount,
+        receive_date = dategiven,
+        revenue_recognition_date = report 
+      ) %>%
+      mutate(
+        financial_type_name = "Grant",
+        receive_date = mdy_hms(receive_date),
+        revenue_recognition_date = mdy_hms(revenue_recognition_date),
+        total_amount = my_coalesce(total_amount, 0)
+      )
+  ) %>%
+  bind_rows(
     new_donation_addresses %>%
       filter(!is.na(new_donation)) %>%
       select(first_name, last_name, receive_date, source, total_amount, campaign_name) %>%
       # replace contact names with ids
-      left_join(contact_info %>% select(first_name, last_name, contact_id = id)) %>%
-      select(-first_name, last_name) %>%
+      left_join(contact_info %>% select(first_name, last_name, contact_id_1 = id)) %>%
+      select(-first_name, -last_name) %>%
       mutate(
         receive_date = as.POSIXct(mdy(receive_date))
-      )
+      ) %>%
+      # replace campaign names with ids
+      left_join(
+        civicrm_campaign %>%
+          select(
+            campaign_name = name,
+            campaign_id = id
+          )
+      ) %>%
+      select(-campaign_name)
   ) %>%
   # replace financial type names with ids
   left_join(
@@ -816,28 +885,80 @@ civicrm_contribution =
       semi_join(civicrm_campaign %>% select(campaign_id = id))
   )
 
+pledges = 
+  tables$pledges %>%
+  select(-pledge_id) %>%
+  rename(
+    contact_id = pledger_id,
+    create_date = pledge_date,
+    start_date = donation_date
+  ) %>%
+  mutate(
+    create_date = mdy_hms(create_date),
+    original_installment_amount = amount,
+    pledge_status_name = 
+      # can't be cancelled and completed
+      ifelse(done, "Completed", ifelse(cancel, "Cancelled", "Pending")),
+    start_date = 
+      as.POSIXct(my_coalesce(mdy_hms(start_date), Sys.time()), origin = "1970-01-01")
+  ) %>%
+  select(-done, -cancel) %>%
+  # replace pledge status names with ids
+  left_join(
+    option_value %>%
+      filter(option_group_name == "pledge_status") %>%
+      select(pledge_status_name = name, status_id = value)
+  ) %>%
+  select(-pledge_status_name) %>%
+  # discard if contact doesn't exist
+  # UNSURE: lose information
+  semi_join(civicrm_contact %>% select(contact_id = id))
+
+civicrm_pledge = 
+  bind_rows(
+   pledges %>%
+      # fill in NA if the campaign doesn't exist
+      # unsure: lose information?
+      anti_join(civicrm_campaign %>% select(campaign_id = id)) %>%
+      mutate(campaign_id = NA),
+   pledges %>%
+      semi_join(civicrm_campaign %>% select(campaign_id = id))
+  )
+
 dbAppendTable(database, "civicrm_campaign", civicrm_campaign)
 dbAppendTable(database, "civicrm_financial_type", new_financial_type)
 # replace old tags
 dbSendQuery(database, "DELETE FROM civicrm_tag")
 dbAppendTable(database, "civicrm_tag", civicrm_tag)
 
+dbAppendTable(database, "civicrm_contact", civicrm_contact)
+
 dbAppendTable(database, "civicrm_address", civicrm_address)
 dbAppendTable(database, "civicrm_loc_block", civicrm_loc_block)
 dbAppendTable(database, "civicrm_email", civicrm_email)
 
-dbAppendTable(database, "civicrm_contact", civicrm_contact)
 dbAppendTable(database, "civicrm_event", civicrm_event)
 
 dbAppendTable(database, "civicrm_entity_tag", civicrm_entity_tag)
 dbAppendTable(database, "civicrm_membership_type", civicrm_membership_type)
 
 dbAppendTable(database, "civicrm_note", civicrm_note)
-dbAppendTable(database, "civicrm_participant", civicrm_pariticpant)
+dbAppendTable(database, "civicrm_participant", civicrm_participant)
 
 dbAppendTable(database, "civicrm_phone", civicrm_phone)
 dbAppendTable(database, "civicrm_website", civicrm_website)
 dbAppendTable(database, "civicrm_membership", civicrm_membership)
 
 dbAppendTable(database, "civicrm_relationship", civicrm_relationship)
+dbAppendTable(database, "civicrm_pledge", civicrm_pledge)
 dbAppendTable(database, "civicrm_contribution", civicrm_contribution)
+
+civicrm_contact %>%
+  filter(contact_type == "Individual") %>%
+  select(id, first_name, last_name) %>%
+  write_csv("individuals_reimport.csv", na = "")
+
+civicrm_contact %>%
+  filter(contact_type == "Organization") %>%
+  select(id, organization_name) %>%
+  write_csv("organizations_reimport.csv", na = "")
