@@ -952,13 +952,3 @@ dbAppendTable(database, "civicrm_membership", civicrm_membership)
 dbAppendTable(database, "civicrm_relationship", civicrm_relationship)
 dbAppendTable(database, "civicrm_pledge", civicrm_pledge)
 dbAppendTable(database, "civicrm_contribution", civicrm_contribution)
-
-civicrm_contact %>%
-  filter(contact_type == "Individual") %>%
-  select(id, first_name, last_name) %>%
-  write_csv("individuals_reimport.csv", na = "")
-
-civicrm_contact %>%
-  filter(contact_type == "Organization") %>%
-  select(id, organization_name) %>%
-  write_csv("organizations_reimport.csv", na = "")
