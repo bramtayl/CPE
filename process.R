@@ -9,7 +9,7 @@ library(RMariaDB)
 library(stringi)
 library(tidyr)
 
-setwd("~/CPE")
+setwd("~/Dropbox/CPE")
 
 database = dbConnect(
   drv = MariaDB(),
@@ -100,19 +100,6 @@ contacts =
 
 participants_2017 = 
   read_csv("participants_2017.csv") %>%
-  select(-Name) %>%
-  rename(
-    cell = `Cell phone`,
-    city = City,
-    email = `Email Address`,
-    first_name = First,
-    last_name = Last,
-    employer_organization_name = `Organization (if applicable)`,
-    postal_code = Zip,
-    role = Role,
-    state_province_abbreviation = State,
-    street_address = Address2
-  ) %>%
   mutate(
     contact_id = 1:n() + max(contacts$contact_id),
     contact_type = "Individual",
@@ -131,17 +118,6 @@ participants_2017 =
 
 participants_2018 = 
   read_csv("participants_2018.csv") %>%
-  rename(
-    cell = `Phone  // Número telefónico`,
-    city = `City/Town  // Ciudad o población`,
-    country_name = `Country  // País`,
-    email = `Email Address`,
-    name = `Name // Nombre`,
-    employer_organization_name = `Organizational Affiliation  // Pertenece a alguna organización?`,
-    state_province_abbreviation = `State  // Estado`,
-    street_address = `Street Address  // Dirección (calle y número)`,
-    postal_code = `ZIP/Postal Code  // Código postal`
-  ) %>%
   separate(name, c("first_name", "last_name"), sep = name_separator, fill = "right") %>%
   mutate(
     contact_id = 1:n() + max(participants_2017$contact_id),
@@ -153,18 +129,6 @@ participants_2018 =
 
 participants_2019 = 
   read_csv("participants_2019.csv") %>%
-  rename(
-    cell = `Phone  // Número telefónico`,
-    city = `City/Town  // Ciudad o población`,
-    country_name = `Country  // País`,
-    email = `Email Address`,
-    name = `Name // Nombre`,
-    employer_organization_name = `Organizational Affiliation  // Pertenece a alguna organización?`,
-    postal_code = `ZIP/Postal Code  // Código postal`,
-    register_date = Timestamp,
-    state_province_abbreviation = `State  // Estado`,
-    street_address = `Street Address  // Dirección (calle y número)`
-  ) %>%
   separate(name, c("first_name", "last_name"), sep = name_separator, fill = "right") %>%
   mutate(
     contact_id = 1:n() + max(participants_2018$contact_id),
@@ -177,17 +141,6 @@ participants_2019 =
 
 new_donations_info = 
   read_csv("new_donations.csv") %>%
-  rename(
-    campaign_name = `Donation campaign`,
-    new_donation = `Database: add this donation`,
-    postal_code = zip,
-    receive_date = `Donation Date`,
-    source = `Payment method`,
-    state_province_abbreviation = state,
-    street_address = address2,
-    supplemental_address_1 = address21,
-    total_amount = `Donation Amt`
-  ) %>%
   separate(name, c("full_name", "partner"), sep = " & ", fill = "right") %>%
   separate(full_name, c("first_name", "last_name"), sep = name_separator, fill = "right") %>%
   separate(partner, c("partner_first_name", "partner_last_name"), sep = name_separator, fill = "right") %>%
