@@ -17,10 +17,10 @@ setwd("~/Dropbox/CPE")
 
 database = dbConnect(
   drv = MariaDB(),
-  username = INSERT_HERE,
-  password = INSERT_HERE,
+  username = "INSERT_HERE",
+  password = "INSERT_HERE",
   host = "populareconomics.org",
-  dbname = INSERT_HERE
+  dbname = "INSERT_HERE"
 )
 
 tables = mdb.get("CPE.mdb", 
@@ -119,7 +119,10 @@ individuals =
     modified_date = as.POSIXct(modified_date)
   ) %>%
   select(-trade) %>%
-  separate(partner, c("partner_first_name", "partner_last_name"), sep = name_separator, fill = "right")
+  separate(partner, c("partner_first_name", "partner_last_name"), 
+           sep = name_separator, 
+           fill = "right"
+  )
 
 # I gave up on trying on deduplication, instead, all potential contacts got a new entry
 # You will have to deduplicate by hand. I'm sorry.
@@ -442,7 +445,8 @@ new_financial_type =
   )
 
 # add two new financial types
-civicrm_financial_type = bind_rows(old_financial_type, new_financial_type)
+civicrm_financial_type = old_financial_type[1:6,]
+# bind_rows(old_financial_type, new_financial_type)
 
 civicrm_tag =
   tables$category_codes %>%
@@ -890,7 +894,7 @@ civicrm_membership =
   # discard if the membership type doesn't exist
   semi_join(civicrm_membership_type %>% select(membership_type_id = id))
 
-contribution_donors = 
+donations = 
   tables$donations %>%
   # these columns seem potentially useful, but i'm not sure how to fit them into the table
   select(-pledge_id, -pledge, -request) %>%
@@ -915,44 +919,49 @@ contribution_donors =
     # fill in 0 if the amount is missing
     total_amount = coalesce(total_amount, 0)
   ) %>%
-  select(-grant, -inkind, -letter) %>%
-  bind_rows(
-    tables$grants %>%
-      # ignoring projects
-      # are these grants already in the donations table?
-      # what units is duration in? how to fit it into the table?
-      select(-grant_id, -project_id, -duration) %>%
-      rename(
-        contact_id_1 = individual_id,
-        total_amount = amount,
-        receive_date = dategiven,
-        revenue_recognition_date = report 
-      ) %>%
-      mutate(
-        financial_type_name = "Grant",
-        total_amount = coalesce(total_amount, 0)
+  select(-grant, -inkind, -letter)
+
+grants = 
+  tables$grants %>%
+  # ignoring projects
+  # are these grants already in the donations table?
+  # what units is duration in? how to fit it into the table?
+  select(-grant_id, -project_id, -duration) %>%
+  rename(
+    contact_id_1 = individual_id,
+    total_amount = amount,
+    receive_date = dategiven,
+    revenue_recognition_date = report 
+  ) %>%
+  mutate(
+    donation_id = 1:n() + max(donations$donation_id),
+    financial_type_name = "Grant",
+    total_amount = coalesce(total_amount, 0)
+  )
+
+new_donations = 
+  new_donations_info %>%
+  # only used marked new downations
+  filter(!is.na(new_donation)) %>%
+  select(contact_id_1 = contact_id, receive_date, source, total_amount, campaign_name) %>%
+  mutate(
+    donation_id = 1:n() + max(grants$donation_id),
+    financial_type_name = "Donation",
+    # convert date to datetime
+    receive_date = mdy(receive_date)
+  ) %>%
+  # replace campaign names with ids
+  left_join(
+    civicrm_campaign %>%
+      select(
+        campaign_name = name,
+        campaign_id = id
       )
   ) %>%
-  bind_rows(
-    new_donations_info %>%
-      # only used marked new downations
-      filter(!is.na(new_donation)) %>%
-      select(contact_id_1 = contact_id, receive_date, source, total_amount, campaign_name) %>%
-      mutate(
-        financial_type_name = "Donation",
-        # convert date to datetime
-        receive_date = mdy(receive_date)
-      ) %>%
-      # replace campaign names with ids
-      left_join(
-        civicrm_campaign %>%
-          select(
-            campaign_name = name,
-            campaign_id = id
-          )
-      ) %>%
-      select(-campaign_name)
-  ) %>%
+  select(-campaign_name)
+
+contribution_donors = 
+  bind_rows(donations, grants, new_donations) %>%
   code(civicrm_financial_type, "financial_type") %>%
   # replace organization ids with contact ids
   left_join(
@@ -1023,6 +1032,7 @@ contribution =
   # use the first contact listed as the donor (Civicrm only allows 1 donor)
   top_n(-1, rank) %>%
   select(-rank) %>%
+  ungroup %>%
   left_join(contribution_donors, .) %>%
   mutate(
     contribution_status_name = "Completed",
@@ -1033,7 +1043,7 @@ contribution =
     net_amount = total_amount
   ) %>%
   select(-donation_id, -contact_id_1, -contact_id_2, -contact_id_3, -contact_id_4) %>%
-  code(option_value, "contribution_status")
+  code_option(option_value, "contribution_status")
 
 # assign all contactless contributions to an arbitrary anonymous contact
 # there probably should just be one contact id for anonymous donations
@@ -1121,4 +1131,5 @@ dbAppendTable(database, "civicrm_website", civicrm_website)
 dbAppendTable(database, "civicrm_membership", civicrm_membership)
 dbAppendTable(database, "civicrm_relationship", civicrm_relationship)
 dbAppendTable(database, "civicrm_pledge", civicrm_pledge)
+dbSendQuery(database, "DELETE FROM civicrm_contribution")
 dbAppendTable(database, "civicrm_contribution", civicrm_contribution)
