@@ -445,8 +445,7 @@ new_financial_type =
   )
 
 # add two new financial types
-civicrm_financial_type = old_financial_type[1:6,]
-# bind_rows(old_financial_type, new_financial_type)
+civicrm_financial_type = bind_rows(old_financial_type, new_financial_type)
 
 civicrm_tag =
   tables$category_codes %>%
