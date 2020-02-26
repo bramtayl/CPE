@@ -22,6 +22,7 @@ mdb.get = function (file, tables = NULL, lowernames = FALSE, allow = NULL,
     s <- strsplit(s, "\t")
     vnames <- sapply(s, function(x) {
       bracketed = x[2]
+      # this removes brackets that mess up type parsing
       substr(bracketed, 2, nchar(bracketed) - 1)
     })
     vnames <- makeNames(vnames, unique = TRUE, allow = allow)
