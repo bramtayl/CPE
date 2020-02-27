@@ -58,8 +58,7 @@ contacts =
   ) %>%
   mutate(
     contact_id = 1:n() + max(individuals$id),
-    contact_type = "Individual",
-    source = "contacts"
+    contact_type = "Individual"
   )
 
 participants_2017 = 
@@ -130,7 +129,9 @@ cpe_members =
     state_province_abbreviation = wstate,
     street_address = waddress
   ) %>%
-  mutate(group_name = "Member")
+  mutate(
+    group_name = "Member"
+  )
 
 # the mail chimp and rise up lists all get their own membership types
 
@@ -149,8 +150,8 @@ mailchimp =
 
 rise_up_community = 
   read_csv("private/cpe_community.csv") %>%
-  # non breaking space is missing
-  mutate(name = ifelse(name == "\u00A0", NA, name)) %>%
+  mutate(name = stri_trim(name)) %>%
+  mutate(name = ifelse(name == "", NA, name)) %>%
   separate(name, c("first_name", "last_name"), sep = name_separator, fill = "right") %>%
   mutate(
     contact_id = 1:n() + max(mailchimp$contact_id),
@@ -166,6 +167,8 @@ rise_up_community =
 
 rise_up_members = 
   read_csv("private/cpe_members.csv") %>%
+  mutate(name = stri_trim(name)) %>%
+  mutate(name = ifelse(name == "", NA, name)) %>%
   separate(name, c("first_name", "last_name"), sep = name_separator, fill = "right") %>%
   mutate(
     contact_id = 1:n() + max(rise_up_community$contact_id),
@@ -181,6 +184,8 @@ rise_up_members =
 
 rise_up_local = 
   read_csv("private/cpe_local.csv") %>%
+  mutate(name = stri_trim(name)) %>%
+  mutate(name = ifelse(name == "", NA, name)) %>%
   separate(name, c("first_name", "last_name"), sep = name_separator, fill = "right") %>%
   mutate(
     contact_id = 1:n() + max(rise_up_members$contact_id),
@@ -266,7 +271,7 @@ new_employers =
     source = "employers"
   )
 
-contact_info = 
+hidden_partners = 
   bind_rows(
     individuals %>%
       select(-partner_first_name, -partner_last_name), 
@@ -302,6 +307,29 @@ contact_info =
       rename(id = contact_id),
     new_employers %>%
       rename(id = contact_id)
+  )
+
+contact_info = 
+  # split out partners which are included via ampersand
+  hidden_partners %>%
+  filter(first_name %>% stri_detect_fixed("&")) %>%
+  rename(new_partner_id = id) %>%
+  mutate(partner_id = coalesce(new_partner_id, partner_id)) %>%
+  select(-new_partner_id) %>%
+  separate(first_name, c("partner_name", "first_name"), sep = "\\s?&\\s?") %>%
+  select(-partner_name) %>%
+  mutate(
+    id = 1:n() + max(hidden_partners$id),
+    contact_type = "Individual",
+    source = "hidden partners"
+  ) %>%
+  select(first_name, last_name, partner_id, id, contact_type, source) %>%
+  bind_rows(
+    # add back in the original data
+    hidden_partners %>%
+      separate(first_name, c("first_name", "discard"), 
+               sep = "\\s?&\\s?", fill = "right") %>%
+      select(-discard)
   ) %>%
   mutate(
     # fill in United States if only a state was given
@@ -323,15 +351,13 @@ contact_info =
     state_province_abbreviation = 
       ifelse(state_province_abbreviation %in% c("", "NA", "NO REGION"),
              NA, state_province_abbreviation),
-    # no break space ended up as a first name in some cases. don't ask me how
-    first_name = ifelse(first_name == "\u00A0", NA, first_name),
     # fill in false for deleted if not specified
     is_deleted = coalesce(is_deleted, FALSE)
-  )
+  ) %>%
+  separate(first_name, c("first_name", "middle_name"), sep = name_separator, fill = "right")
 
 civicrm_contact = 
   contact_info %>%
-  separate(first_name, c("first_name", "middle_name"), sep = name_separator, fill = "right") %>%
   mutate(
     # truncate long organization names to fit into the database
     organization_name = stri_sub(organization_name, to = 128),
@@ -363,3 +389,4 @@ civicrm_contact =
     # website 
     -url
   )
+
