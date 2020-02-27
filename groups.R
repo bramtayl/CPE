@@ -63,4 +63,7 @@ civicrm_group_contact =
   group_contact %>%
   code(civicrm_group, "group") %>%
   # discard if the contacts don't exist
-  strict_join(contact_info %>% select(contact_id = id), "contact", drop = TRUE)
+  strict_join(contact_info %>% select(contact_id = id), "contact", drop = TRUE) %>%
+  mutate(
+    status = coalesce(status, "Added")
+  )
