@@ -50,6 +50,10 @@ civicrm_email =
     contact_id = id, email
   ) %>%
   filter(!is.na(email)) %>%
+  # lowercase usernames (case insensitive)
+  separate(email, c("user", "domain"), sep = "@", extra = "merge", fill = "right") %>%
+  mutate(user = stri_trans_tolower(user)) %>%
+  unite("email", user, domain, sep = "@") %>%
   mutate(
     is_billing = TRUE,
     is_bulkmail = TRUE,
