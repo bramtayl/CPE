@@ -51,10 +51,8 @@ civicrm_email =
   ) %>%
   filter(!is.na(email)) %>%
   # lowercase usernames (case insensitive)
-  separate(email, c("user", "domain"), sep = "@", extra = "merge", fill = "right") %>%
-  mutate(user = stri_trans_tolower(user)) %>%
-  unite("email", user, domain, sep = "@") %>%
   mutate(
+    email = stri_trans_tolower(email),
     is_billing = TRUE,
     is_bulkmail = TRUE,
     is_primary = TRUE,
@@ -85,7 +83,7 @@ address =
   ) %>%
   mutate(
     id = coalesce(id, 1:n()),
-    # truncate long street addresses to fit into othe database (there's only one)
+    # truncate long street addresses to fit into other database (there's only one)
     street_address = stri_sub(street_address, to = 96)
   ) %>%
   filter(!is.na(street_address)) %>%
