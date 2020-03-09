@@ -369,7 +369,8 @@ civicrm_contact =
       ),
       email
     ),
-    sort_name = display_name
+    sort_name = display_name,
+    street_address = stri_sub(street_address, to = 96)
   ) %>%
   select(
     # address 

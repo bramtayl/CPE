@@ -16,6 +16,7 @@ civicrm_phone =
     contact_id = id, cell, phone, wphone, fax, phone_ext
   ) %>%
   gather("phone_type_location_type_name", "phone", cell, fax, phone, wphone, na.rm = TRUE) %>%
+  mutate(phone = stri_replace_all_regex(phone, "[^[:digit:]]", "")) %>%
   strict_join(
     # phone_type_location_type_name contains both phone type and location type information
     tibble(
@@ -50,6 +51,9 @@ civicrm_email =
     contact_id = id, email
   ) %>%
   filter(!is.na(email)) %>%
+  separate(email, c("email1", "email2"), sep = ", ", fill = "right") %>%
+  gather("number", "email", na.rm = TRUE, -contact_id) %>%
+  select(-number) %>%
   # lowercase usernames (case insensitive)
   mutate(
     email = stri_trans_tolower(email),
@@ -81,12 +85,20 @@ address =
         city, postal_code, state_province_abbreviation, country_name, fill_USA
       )
   ) %>%
+  filter(!(
+    is.na(street_address) &
+      is.na(supplemental_address_1) &
+      is.na(city) &
+      is.na(postal_code) &
+      is.na(state_province_abbreviation) &
+      is.na(country_name)
+    )) %>%
   mutate(
     id = coalesce(id, 1:n()),
+    location_type_name = "Home",
     # truncate long street addresses to fit into other database (there's only one)
-    street_address = stri_sub(street_address, to = 96)
   ) %>%
-  filter(!is.na(street_address)) %>%
+  code(dbReadTable(database, "civicrm_location_type"), "location_type") %>%
   mutate(
     is_billing = TRUE,
     is_primary = TRUE

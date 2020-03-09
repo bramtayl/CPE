@@ -9,11 +9,7 @@ library(RMariaDB)
 library(stringi)
 library(tidyr)
 library(zoo)
-
-# TODO: audit field defaults
-# TODO: use groups
-# TODO: add dummies instead of missing
-# fill in notes fields to avoid losing data
+library(httr)
 
 setwd("~/CPE")
 source("mdb.get_patch.R")
